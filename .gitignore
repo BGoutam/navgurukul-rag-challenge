@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Virtual envs
+venv/
+.venv/
+
+# Secrets
+.env
+
+# Runtime data
+data/chroma_db/
+data/audit.jsonl
+data/evals.jsonl
+data/benchmark_results.json
+data/pdfs/*.pdf
+
+# Keep the README that explains what goes in data/pdfs/
+!data/pdfs/README.md
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

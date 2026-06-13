@@ -1,0 +1,28 @@
+# Navgurukul RAG Challenge — pinned dependencies
+# Free / open-source stack for retrieval; hosted Claude for generation
+
+# Web
+fastapi==0.115.0
+uvicorn==0.42.0
+python-dotenv==1.0.1
+pydantic==2.13.0
+
+# PDF text + OCR
+pdfplumber==0.11.4
+pypdfium2==4.30.0
+pytesseract==0.3.10
+Pillow==11.3.0
+
+# Embeddings + vector DB (open-source)
+sentence-transformers==3.0.1
+chromadb==0.5.15
+
+# LLM (generation, guardrail, eval judge)
+anthropic==0.86.0
+
+# Reranker model (optional, loaded lazily)
+# Already covered by sentence-transformers; the CrossEncoder is imported from it.
+
+# Utilities
+tqdm==4.66.5
+pytz==2024.1

@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Navgurukul RAG · Open-source retrieval, cited answers</title>
+  <style>
+    /* ── Reset + base ─────────────────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0a0e14;
+      color: #d8dce3;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      line-height: 1.55;
+    }
+    a { color: #6ea8fe; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre {
+      font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      font-size: 0.85em;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────────────── */
+    header {
+      padding: 22px 28px 18px;
+      border-bottom: 1px solid #1a2030;
+      background: linear-gradient(180deg, #0d121a 0%, #0a0e14 100%);
+    }
+    header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: #e6e9ef;
+    }
+    header h1 .accent { color: #6ea8fe; }
+    header .tagline {
+      font-size: 12px;
+      color: #6b7588;
+      margin-top: 3px;
+    }
+    .status-strip {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: #0e131c;
+      border: 1px solid #1a2030;
+      border-radius: 8px;
+      font-size: 11px;
+      color: #98a3b8;
+    }
+    .status-strip .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #131a26;
+      border: 1px solid #1f2839;
+      font-weight: 500;
+    }
+    .status-strip .pill.ok    { color: #6ec896; border-color: #2a4a3a; }
+    .status-strip .pill.warn  { color: #d4a366; border-color: #4a3e26; }
+    .status-strip .pill.error { color: #d47a7a; border-color: #4a2a2a; }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* ── Chat log ─────────────────────────────────────────────────────────── */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 28px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .msg {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: 760px;
+    }
+    .msg.user { align-self: flex-end; }
+    .msg.bot  { align-self: flex-start; width: 100%; }
+    .bubble {
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+    .msg.user .bubble {
+      background: #1a273d;
+      border: 1px solid #243650;
+      color: #e6e9ef;
+    }
+    .msg.bot .bubble {
+      background: #11161f;
+      border: 1px solid #1a2030;
+      color: #d8dce3;
+    }
+    .msg.bot .bubble.idk {
+      background: #1a1a0e;
+      border-color: #3a3a1e;
+      color: #b8a86b;
+      font-style: italic;
+    }
+    .msg.bot .bubble.blocked {
+      background: #1f0e0e;
+      border: 1px solid #5a2222;
+      color: #e6a8a8;
+    }
+    .blocked-banner {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: #3a1414;
+      border: 1px solid #5a2222;
+      color: #ffb0b0;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .guardrail-strip {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #6b7588;
+    }
+    .guardrail-strip .verdict-pill {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      margin-right: 6px;
+    }
+    .verdict-SAFE     { background: #143a24; border: 1px solid #2a5a3a; color: #8ed6a8; }
+    .verdict-TIMEOUT,
+    .verdict-ERROR    { background: #2a2414; border: 1px solid #4a3e26; color: #d4a366; }
+    .verdict-PROMPT_INJECTION,
+    .verdict-MALICIOUS_TOOL_REQUEST,
+    .verdict-PII_LEAK,
+    .verdict-OFF_POLICY { background: #3a1414; border: 1px solid #5a2222; color: #ffa8a8; }
+    .bubble p { margin-bottom: 8px; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble ul, .bubble ol { margin: 8px 0 8px 22px; }
+    .bubble li { margin-bottom: 4px; }
+    .bubble strong { color: #e6e9ef; font-weight: 600; }
+    .bubble .cite {
+      display: inline-block;
+      padding: 1px 6px;
+      margin: 0 1px;
+      border-radius: 4px;
+      background: #18253a;
+      border: 1px solid #243650;
+      color: #6ea8fe;
+      font-size: 11px;
+      font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      cursor: help;
+      vertical-align: baseline;
+    }
+
+    /* ── Source expander + metrics row ────────────────────────────────────── */
+    .meta-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: #6b7588;
+      margin-top: 6px;
+    }
+    .meta-row .latency .num { color: #98a3b8; font-weight: 500; }
+    .meta-row .latency .num.fast   { color: #6ec896; }
+    .meta-row .latency .num.medium { color: #d4a366; }
+    .meta-row .latency .num.slow   { color: #d47a7a; }
+
+    details.sources {
+      margin-top: 8px;
+      border: 1px solid #1a2030;
+      border-radius: 8px;
+      background: #0e131c;
+    }
+    details.sources summary {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #98a3b8;
+      list-style: none;
+    }
+    details.sources summary::-webkit-details-marker { display: none; }
+    details.sources summary::before {
+      content: "▸ ";
+      color: #4a5468;
+      display: inline-block;
+      width: 1em;
+    }
+    details.sources[open] summary::before { content: "▾ "; }
+    details.sources .src-list {
+      padding: 0 12px 10px;
+      border-top: 1px solid #1a2030;
+    }
+    .src-item {
+      padding: 8px 0;
+      border-bottom: 1px dashed #1a2030;
+      font-size: 12px;
+    }
+    .src-item:last-child { border-bottom: none; }
+    .src-item .src-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+    .src-item .src-name { color: #6ea8fe; font-weight: 500; }
+    .src-item .src-score { color: #6b7588; font-family: ui-monospace, "SF Mono", monospace; }
+    .src-item .src-preview {
+      color: #7a8499;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    /* ── Footer / input ───────────────────────────────────────────────────── */
+    footer {
+      padding: 14px 28px 16px;
+      border-top: 1px solid #1a2030;
+      background: #0d121a;
+    }
+    form {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    input#question {
+      flex: 1;
+      padding: 11px 14px;
+      background: #131a26;
+      color: #e6e9ef;
+      border: 1px solid #243650;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input#question:focus {
+      outline: none;
+      border-color: #6ea8fe;
+      box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.15);
+    }
+    input#question:disabled { opacity: 0.5; cursor: wait; }
+    button {
+      padding: 11px 22px;
+      background: #6ea8fe;
+      color: #0a0e14;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: #80b6ff; }
+    button:disabled { opacity: 0.4; cursor: wait; background: #6ea8fe; }
+
+    .controls {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      margin-top: 8px;
+      font-size: 11px;
+      color: #6b7588;
+    }
+    .controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .controls input[type=checkbox] { cursor: pointer; }
+    .controls .hint { margin-left: auto; }
+
+    .empty {
+      text-align: center;
+      padding: 80px 20px;
+      color: #4a5468;
+      font-size: 13px;
+    }
+    .empty h2 { font-size: 16px; color: #6b7588; margin-bottom: 8px; }
+
+    /* ── Tab bar ──────────────────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-top: 14px;
+      border-bottom: 1px solid #1a2030;
+    }
+    .tab {
+      padding: 8px 16px;
+      background: transparent;
+      color: #6b7588;
+      border: none;
+      border-bottom: 2px solid transparent;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      border-radius: 0;
+    }
+    .tab:hover { color: #98a3b8; background: transparent; }
+    .tab.active {
+      color: #6ea8fe;
+      border-bottom-color: #6ea8fe;
+    }
+
+    /* ── View containers ──────────────────────────────────────────────────── */
+    .views { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    .view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+    .view.active { display: flex; }
+
+    /* ── Ingest view ──────────────────────────────────────────────────────── */
+    .ingest-pane {
+      padding: 22px 28px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .ingest-form {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+    .ingest-form input[type=text] {
+      flex: 1;
+      padding: 10px 14px;
+      background: #131a26;
+      color: #e6e9ef;
+      border: 1px solid #243650;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: ui-monospace, "SF Mono", monospace;
+    }
+    .ingest-form input[type=text]:focus {
+      outline: none;
+      border-color: #6ea8fe;
+    }
+    .ingest-form label.checkbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #98a3b8;
+      font-size: 12px;
+      padding: 0 8px;
+    }
+
+    .ingest-card {
+      background: #11161f;
+      border: 1px solid #1a2030;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .ingest-card h3 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: #6b7588;
+      margin-bottom: 10px;
+    }
+    .current-file {
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 13px;
+      color: #e6e9ef;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+    .current-file .label { color: #6b7588; }
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #131a26;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .progress-bar .fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6ea8fe 0%, #80b6ff 100%);
+      transition: width 0.2s;
+      width: 0%;
+    }
+    .page-counter {
+      font-size: 11px;
+      color: #6b7588;
+      margin-top: 4px;
+      font-family: ui-monospace, "SF Mono", monospace;
+    }
+    .ingest-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .ingest-stat {
+      background: #0e131c;
+      border: 1px solid #1a2030;
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .ingest-stat .num {
+      font-size: 22px;
+      font-weight: 700;
+      color: #e6e9ef;
+      font-family: ui-monospace, "SF Mono", monospace;
+    }
+    .ingest-stat .lbl {
+      font-size: 10px;
+      color: #6b7588;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-top: 4px;
+    }
+
+    .ingest-log {
+      background: #0a0e14;
+      border: 1px solid #1a2030;
+      border-radius: 8px;
+      padding: 10px 14px;
+      max-height: 280px;
+      overflow-y: auto;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #98a3b8;
+    }
+    .ingest-log .ok    { color: #6ec896; }
+    .ingest-log .skip  { color: #6b7588; }
+    .ingest-log .err   { color: #d47a7a; }
+
+    /* ── Audit view ───────────────────────────────────────────────────────── */
+    .audit-pane {
+      padding: 22px 28px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .audit-header {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .audit-header h2 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #e6e9ef;
+    }
+    .audit-header .verify {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .audit-header .verify.valid {
+      background: #143a24;
+      border: 1px solid #2a5a3a;
+      color: #8ed6a8;
+    }
+    .audit-header .verify.invalid {
+      background: #3a1414;
+      border: 1px solid #5a2222;
+      color: #ffa8a8;
+    }
+    .audit-list { display: flex; flex-direction: column; gap: 6px; }
+    .audit-entry {
+      background: #0e131c;
+      border: 1px solid #1a2030;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+    }
+    .audit-entry .top {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .audit-entry .action {
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #18253a;
+      color: #6ea8fe;
+      border: 1px solid #243650;
+    }
+    .audit-entry .action.gr-blocked {
+      background: #3a1414; color: #ffa8a8; border-color: #5a2222;
+    }
+    .audit-entry .action.ingest    { background: #2a2414; color: #d4a366; border-color: #4a3e26; }
+    .audit-entry .action.input     { background: #14253a; color: #80b6ff; border-color: #244060; }
+    .audit-entry .ts {
+      color: #6b7588;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 11px;
+    }
+    .audit-entry .hash {
+      color: #4a5468;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 10px;
+      margin-left: auto;
+    }
+    .audit-entry .details {
+      color: #98a3b8;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 11px;
+      word-break: break-word;
+    }
+
+    /* Loading dots animation */
+    .loading-dots span {
+      display: inline-block;
+      width: 5px; height: 5px;
+      margin: 0 2px;
+      background: #6ea8fe;
+      border-radius: 50%;
+      opacity: 0.4;
+      animation: pulse 1.2s infinite;
+    }
+    .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes pulse {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Navgurukul <span class="accent">RAG</span></h1>
+    <p class="tagline">Open-source retrieval · Claude generation · Cited answers</p>
+    <div class="status-strip" id="status-strip">
+      <span>Loading status…</span>
+    </div>
+    <div class="status-strip" id="quality-strip" style="margin-top: 6px;">
+      <span style="color:#4a5468;">Loading eval stats…</span>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-view="chat">Chat</button>
+      <button class="tab" data-view="ingest">Ingest</button>
+      <button class="tab" data-view="audit">Audit</button>
+    </div>
+  </header>
+
+  <div class="views">
+
+    <!-- ── Chat view ──────────────────────────────────────────────────────── -->
+    <section class="view active" id="view-chat">
+      <main id="chat-log">
+        <div class="empty" id="empty-state">
+          <h2>Ask a question about the indexed corpus.</h2>
+          <p>Every answer cites the source PDF and page number.<br>
+             Try: "What is multi-head attention?" or "How do Q, K, V matrices work?"</p>
+        </div>
+      </main>
+
+      <footer>
+        <form id="ask-form">
+          <input id="question" type="text"
+                 placeholder="Ask a question about the corpus..."
+                 autocomplete="off" required>
+          <button type="submit" id="submit-btn">Ask</button>
+        </form>
+        <div class="controls">
+          <label><input type="checkbox" id="rerank-toggle"> Rerank (CrossEncoder)</label>
+          <label>k: <input type="number" id="k-input" min="1" max="25" value="8"
+                           style="width: 50px; padding: 2px 6px; background:#131a26;
+                                  color:#e6e9ef; border:1px solid #243650; border-radius:4px;"></label>
+          <span class="hint">Local embeddings · Hosted Claude · Audit + eval live</span>
+        </div>
+      </footer>
+    </section>
+
+    <!-- ── Ingest view ────────────────────────────────────────────────────── -->
+    <section class="view" id="view-ingest">
+      <div class="ingest-pane">
+        <div style="margin-bottom: 18px;">
+          <h2 style="font-size:14px; color:#e6e9ef;">Document Ingestion</h2>
+          <p style="font-size:12px; color:#6b7588; margin-top:3px;">
+            PDF → text + OCR fallback → chunk → Sentence Transformers embedding → ChromaDB.
+            Idempotent: unchanged PDFs are skipped by SHA-256.
+          </p>
+        </div>
+
+        <form class="ingest-form" id="ingest-form">
+          <input id="ingest-dir" type="text"
+                 value="../Bearpaw/Transformers/textbooks/"
+                 placeholder="Directory of PDFs (relative or absolute)">
+          <label class="checkbox"><input type="checkbox" id="ingest-force"> Force</label>
+          <button type="submit" id="ingest-btn">Start ingestion</button>
+        </form>
+
+        <div class="ingest-card">
+          <h3>Currently processing</h3>
+          <div class="current-file" id="current-file">
+            <span class="label">Idle. Click Start ingestion.</span>
+          </div>
+          <div class="progress-bar"><div class="fill" id="page-progress"></div></div>
+          <div class="page-counter" id="page-counter">—</div>
+        </div>
+
+        <div class="ingest-card">
+          <h3>Running totals</h3>
+          <div class="ingest-stats">
+            <div class="ingest-stat">
+              <div class="num" id="stat-pdfs">0</div>
+              <div class="lbl">PDFs processed</div>
+            </div>
+            <div class="ingest-stat">
+              <div class="num" id="stat-pages">0</div>
+              <div class="lbl">Pages</div>
+            </div>
+            <div class="ingest-stat">
+              <div class="num" id="stat-chunks">0</div>
+              <div class="lbl">Chunks created</div>
+            </div>
+            <div class="ingest-stat">
+              <div class="num" id="stat-elapsed">0s</div>
+              <div class="lbl">Wall time</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ingest-card" style="padding-bottom: 8px;">
+          <h3>Log</h3>
+          <div class="ingest-log" id="ingest-log">
+            <span style="color:#4a5468;">Log entries will appear here once you start.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Audit view ─────────────────────────────────────────────────────── -->
+    <section class="view" id="view-audit">
+      <div class="audit-pane">
+        <div class="audit-header">
+          <h2>Merkle Audit Chain</h2>
+          <span class="verify" id="audit-verify">…</span>
+          <button id="audit-refresh"
+                  style="margin-left:auto; padding: 6px 14px; font-size: 11px;
+                         background:#131a26; color:#98a3b8; border:1px solid #243650;
+                         border-radius:6px; cursor:pointer;">
+            Refresh
+          </button>
+        </div>
+        <p style="font-size:12px; color:#6b7588; margin-bottom: 12px;">
+          Every chat, guardrail decision, and ingestion is recorded as a
+          SHA-256-linked entry. Tamper-evident: any modification to a historical
+          entry breaks every hash after it.
+        </p>
+        <div class="audit-list" id="audit-list">
+          <span style="color:#4a5468;">Loading…</span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    const chatLog = document.getElementById('chat-log');
+    const emptyState = document.getElementById('empty-state');
+    const form = document.getElementById('ask-form');
+    const questionInput = document.getElementById('question');
+    const submitBtn = document.getElementById('submit-btn');
+    const rerankToggle = document.getElementById('rerank-toggle');
+    const kInput = document.getElementById('k-input');
+    const statusStrip = document.getElementById('status-strip');
+
+    // ── HTML-escape helper ─────────────────────────────────────────────────
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // ── Latency colour bucket ──────────────────────────────────────────────
+    function latencyClass(ms) {
+      if (ms < 2000) return 'fast';
+      if (ms < 5000) return 'medium';
+      return 'slow';
+    }
+
+    // ── Render the answer with inline citation pills ───────────────────────
+    function renderAnswer(text) {
+      // Replace [<filename> p.<n>] with a span we can style
+      // The filename may contain almost anything except ']'.
+      const pattern = /\[([^\]]+?)\s+p\.\s*(\d+)\]/g;
+      let html = esc(text);
+      // Re-apply pattern on the escaped string (escape doesn't touch [ ])
+      html = html.replace(pattern, (m, name, page) => {
+        return `<span class="cite" title="${esc(name.trim())}, page ${page}">[${esc(name.trim())} p.${page}]</span>`;
+      });
+      // Convert line breaks to paragraphs
+      const paragraphs = html.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+      return paragraphs;
+    }
+
+    // ── Append a user bubble ───────────────────────────────────────────────
+    function appendUser(question) {
+      if (emptyState) emptyState.remove();
+      const msg = document.createElement('div');
+      msg.className = 'msg user';
+      msg.innerHTML = `<div class="bubble">${esc(question)}</div>`;
+      chatLog.appendChild(msg);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    // ── Append a loading placeholder; return the element so we can replace it
+    function appendLoading() {
+      const msg = document.createElement('div');
+      msg.className = 'msg bot';
+      msg.innerHTML = `<div class="bubble">
+        <span class="loading-dots"><span></span><span></span><span></span></span>
+        <span style="color:#6b7588; font-size:12px; margin-left:8px;">Retrieving + generating…</span>
+      </div>`;
+      chatLog.appendChild(msg);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return msg;
+    }
+
+    // ── Append a bot bubble with answer + metadata ─────────────────────────
+    function appendBot(result, loadingEl) {
+      // Blocked by guardrail → red bubble + verdict banner, no chunks/citations
+      if (result.blocked) {
+        const v = result.guardrail || {};
+        const html = `<div class="bubble blocked">
+          <div class="blocked-banner">⛔ BLOCKED · ${esc(v.verdict || 'UNKNOWN')}</div>
+          <div>${esc(result.answer)}</div>
+        </div>
+        <div class="guardrail-strip">
+          <span class="verdict-pill verdict-${esc(v.verdict || 'ERROR')}">${esc(v.verdict || '?')}</span>
+          confidence ${(v.confidence ?? 0).toFixed(2)} · guardrail ${(result.timing?.guardrail_ms ?? 0)}ms
+        </div>`;
+        if (loadingEl) loadingEl.innerHTML = html;
+        else {
+          const msg = document.createElement('div');
+          msg.className = 'msg bot';
+          msg.innerHTML = html;
+          chatLog.appendChild(msg);
+        }
+        chatLog.scrollTop = chatLog.scrollHeight;
+        // Refresh quality strip; guardrail blocks don't trigger eval
+        refreshQuality();
+        return;
+      }
+
+      const bubbleClass = result.is_idk ? 'bubble idk' : 'bubble';
+      const answerHTML = renderAnswer(result.answer);
+
+      // Chunks expander
+      const chunks = result.chunks || [];
+      let chunksHTML = '';
+      if (chunks.length) {
+        const items = chunks.map(c => {
+          const scoreLine = c.rerank_score != null
+            ? `rerank ${c.rerank_score.toFixed(3)} · sim ${c.score.toFixed(3)}`
+            : `sim ${c.score.toFixed(3)}`;
+          return `<div class="src-item">
+            <div class="src-head">
+              <span class="src-name">${esc(c.pdf_name)} · p.${c.page}</span>
+              <span class="src-score">${scoreLine}</span>
+            </div>
+            <div class="src-preview">${esc(c.text_preview)}${c.text_preview.length >= 240 ? '…' : ''}</div>
+          </div>`;
+        }).join('');
+        chunksHTML = `<details class="sources">
+          <summary>Retrieved chunks (${chunks.length})</summary>
+          <div class="src-list">${items}</div>
+        </details>`;
+      }
+
+      // Metrics row
+      const totalMs = result.timing.total_ms;
+      const cls = latencyClass(totalMs);
+      const rerankPart = result.timing.rerank_ms != null
+        ? `· rerank <span class="num">${result.timing.rerank_ms}ms</span> `
+        : '';
+      const metaHTML = `<div class="meta-row">
+        <span class="latency">
+          retrieve <span class="num">${result.timing.retrieval_ms}ms</span>
+          ${rerankPart}· generate <span class="num">${result.timing.generation_ms}ms</span>
+          · <strong>total <span class="num ${cls}">${totalMs}ms</span></strong>
+        </span>
+        <span>· ${result.usage.input_tokens} in, ${result.usage.output_tokens} out · ${esc(result.usage.model)}</span>
+      </div>`;
+
+      // Guardrail strip (always shown for passed responses — that's how we prove
+      // the safety check ran for every interaction, not just the blocked ones)
+      const g = result.guardrail || {};
+      const guardrailHTML = g.verdict ? `<div class="guardrail-strip">
+        <span class="verdict-pill verdict-${esc(g.verdict)}">${esc(g.verdict)}</span>
+        guardrail ${result.timing.guardrail_ms ?? 0}ms · confidence ${(g.confidence ?? 0).toFixed(2)}
+      </div>` : '';
+
+      const html = `<div class="${bubbleClass}">${answerHTML}</div>${chunksHTML}${guardrailHTML}${metaHTML}`;
+      if (loadingEl) {
+        loadingEl.innerHTML = html;
+      } else {
+        const msg = document.createElement('div');
+        msg.className = 'msg bot';
+        msg.innerHTML = html;
+        chatLog.appendChild(msg);
+      }
+      chatLog.scrollTop = chatLog.scrollHeight;
+      // Eval ran in the background — poll for updated quality numbers
+      // after a short delay to let the eval queue process the new job.
+      setTimeout(refreshQuality, 4000);
+    }
+
+    function appendError(message, loadingEl) {
+      const html = `<div class="bubble" style="background:#1a0e0e; border-color:#3a1e1e; color:#d47a7a;">
+        <strong>Error:</strong> ${esc(message)}
+      </div>`;
+      if (loadingEl) loadingEl.innerHTML = html;
+      else {
+        const msg = document.createElement('div');
+        msg.className = 'msg bot';
+        msg.innerHTML = html;
+        chatLog.appendChild(msg);
+      }
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    // ── Status strip: fetch ingest stats ───────────────────────────────────
+    const qualityStrip = document.getElementById('quality-strip');
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/ingest-status');
+        const s = await res.json();
+        const pill = s.populated
+          ? `<span class="pill ok"><span class="dot"></span>Index ready</span>`
+          : `<span class="pill warn"><span class="dot"></span>Empty corpus</span>`;
+        statusStrip.innerHTML = `
+          ${pill}
+          <span>· <strong style="color:#98a3b8;">${s.n_pdfs}</strong> PDFs</span>
+          <span>· <strong style="color:#98a3b8;">${s.vector_count.toLocaleString()}</strong> chunks</span>
+          <span style="margin-left:auto; color:#4a5468;">embedding: all-MiniLM-L6-v2 (open-source)</span>
+        `;
+      } catch (e) {
+        statusStrip.innerHTML = `<span class="pill error"><span class="dot"></span>Backend unreachable</span>`;
+      }
+    }
+
+    function verdictPill(verdict, count) {
+      return `<span class="pill" style="color: var(--c, #98a3b8); border-color: currentColor;">
+        ${esc(verdict)}: <strong>${count}</strong>
+      </span>`;
+    }
+
+    async function refreshQuality() {
+      try {
+        const res = await fetch('/eval-stats?last_n=50');
+        const s = await res.json();
+        if (s.n === 0) {
+          qualityStrip.innerHTML = `<span class="pill warn"><span class="dot"></span>No evals yet</span>
+            <span style="color:#4a5468;">· auto-eval scores appear after first /chat call</span>
+            <span style="margin-left:auto; color:#4a5468;">judge: Claude Haiku · spec-driven 5-dimension scoring</span>`;
+          return;
+        }
+        const dim = s.by_dim || {};
+        const dimBits = ['relevance', 'citation_accuracy', 'faithfulness', 'completeness', 'response_quality']
+          .map(d => {
+            const v = dim[d]?.avg;
+            const label = d.replace(/_/g, ' ');
+            const colour = v == null ? '#6b7588' : v >= 4 ? '#6ec896' : v >= 3 ? '#d4a366' : '#d47a7a';
+            return `<span title="${label}: avg ${v ?? 'n/a'} over ${dim[d]?.count ?? 0} evals">
+              <span style="color:#6b7588;">${label.slice(0,4)}:</span>
+              <strong style="color:${colour}">${v == null ? '–' : v.toFixed(1)}</strong>
+            </span>`;
+          })
+          .join(' · ');
+        const verdicts = s.verdicts || {};
+        const passCount = verdicts.PASS || 0;
+        const partialCount = verdicts.PARTIAL || 0;
+        const failCount = verdicts.FAIL || 0;
+        const queueSize = s.queue?.queue_size ?? 0;
+        const queueNote = queueSize > 0
+          ? `· <span style="color:#d4a366;">${queueSize} in queue</span>`
+          : '';
+
+        qualityStrip.innerHTML = `
+          <span class="pill ok"><span class="dot"></span>Eval live (last ${s.n})</span>
+          <span style="color:#98a3b8;">overall <strong style="color:#e6e9ef;">${s.avg_overall ?? '–'}</strong></span>
+          <span>· ${dimBits}</span>
+          <span style="margin-left:auto; color:#6b7588;">
+            <span style="color:#6ec896;">${passCount}P</span> ·
+            <span style="color:#d4a366;">${partialCount}p</span> ·
+            <span style="color:#d47a7a;">${failCount}F</span>
+            ${queueNote}
+          </span>
+        `;
+      } catch (e) {
+        qualityStrip.innerHTML = `<span class="pill error"><span class="dot"></span>Eval stats unavailable</span>`;
+      }
+    }
+
+    refreshStatus();
+    refreshQuality();
+    // Re-poll every 10s in case the background queue catches up
+    setInterval(refreshQuality, 10000);
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Tab switcher
+    // ──────────────────────────────────────────────────────────────────────
+    const tabs = document.querySelectorAll('#tabs .tab');
+    const views = document.querySelectorAll('.view');
+    tabs.forEach(t => {
+      t.addEventListener('click', () => {
+        const target = t.dataset.view;
+        tabs.forEach(x => x.classList.toggle('active', x === t));
+        views.forEach(v => v.classList.toggle('active', v.id === `view-${target}`));
+        if (target === 'audit') refreshAudit();
+      });
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Ingest view — SSE-driven progress
+    // ──────────────────────────────────────────────────────────────────────
+    const ingestForm = document.getElementById('ingest-form');
+    const ingestDir = document.getElementById('ingest-dir');
+    const ingestForce = document.getElementById('ingest-force');
+    const ingestBtn = document.getElementById('ingest-btn');
+    const currentFile = document.getElementById('current-file');
+    const pageProgress = document.getElementById('page-progress');
+    const pageCounter = document.getElementById('page-counter');
+    const statPdfs = document.getElementById('stat-pdfs');
+    const statPages = document.getElementById('stat-pages');
+    const statChunks = document.getElementById('stat-chunks');
+    const statElapsed = document.getElementById('stat-elapsed');
+    const ingestLog = document.getElementById('ingest-log');
+
+    let ingestES = null;
+    let ingestStart = 0;
+    let elapsedTimer = null;
+    let ingestSeenPdfs = new Set();
+    let pageAccum = 0;
+    let chunkAccum = 0;
+
+    function ingestLogLine(html, cls = '') {
+      const div = document.createElement('div');
+      div.className = cls;
+      div.innerHTML = html;
+      ingestLog.appendChild(div);
+      ingestLog.scrollTop = ingestLog.scrollHeight;
+    }
+
+    function resetIngestStats() {
+      ingestSeenPdfs = new Set();
+      pageAccum = 0;
+      chunkAccum = 0;
+      statPdfs.textContent = '0';
+      statPages.textContent = '0';
+      statChunks.textContent = '0';
+      statElapsed.textContent = '0s';
+      pageProgress.style.width = '0%';
+      pageCounter.textContent = '—';
+      currentFile.innerHTML = '<span class="label">Starting…</span>';
+      ingestLog.innerHTML = '';
+    }
+
+    function startElapsedTimer() {
+      ingestStart = Date.now();
+      elapsedTimer = setInterval(() => {
+        const s = ((Date.now() - ingestStart) / 1000).toFixed(0);
+        statElapsed.textContent = `${s}s`;
+      }, 250);
+    }
+
+    function stopElapsedTimer() {
+      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    }
+
+    ingestForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const dir = ingestDir.value.trim();
+      if (!dir) return;
+      const force = ingestForce.checked;
+
+      if (ingestES) { ingestES.close(); ingestES = null; }
+      resetIngestStats();
+      ingestBtn.disabled = true;
+      ingestBtn.textContent = 'Running…';
+      startElapsedTimer();
+
+      ingestLogLine(`<span style="color:#6ec896;">> Starting ingestion of ${esc(dir)}${force ? ' (FORCE)' : ''}</span>`);
+
+      const url = `/ingest/run?dir=${encodeURIComponent(dir)}&force=${force}`;
+      ingestES = new EventSource(url);
+
+      ingestES.onmessage = (evt) => {
+        let data;
+        try { data = JSON.parse(evt.data); } catch { return; }
+
+        if (data.type === 'start') {
+          ingestLogLine(`<span class="ok">resolved → ${esc(data.pdf_dir)}</span>`);
+
+        } else if (data.type === 'progress') {
+          if (data.status === 'SKIP') {
+            // PDF already ingested (SHA-256 match)
+            ingestLogLine(`<span class="skip">[skip] ${esc(data.pdf_name)}  (${esc(data.reason || 'unchanged')})</span>`);
+            ingestSeenPdfs.add(data.pdf_name);
+            statPdfs.textContent = ingestSeenPdfs.size;
+          } else if (data.status === 'LOAD_MODEL') {
+            currentFile.innerHTML = `<span class="label">Loading embedding model:</span> ${esc(data.reason || '')}`;
+          } else if (data.pdf_name) {
+            // Per-page progress update
+            currentFile.innerHTML = `<span class="label">Processing:</span> ${esc(data.pdf_name)}`;
+            if (data.page && data.total) {
+              const pct = Math.min(100, Math.round((data.page / data.total) * 100));
+              pageProgress.style.width = `${pct}%`;
+              pageCounter.textContent = `page ${data.page} / ${data.total}  (${pct}%)`;
+            }
+            if (!ingestSeenPdfs.has(data.pdf_name)) {
+              ingestSeenPdfs.add(data.pdf_name);
+              statPdfs.textContent = ingestSeenPdfs.size;
+              ingestLogLine(`<span class="ok">[ingest] ${esc(data.pdf_name)}</span>`);
+            }
+          }
+
+        } else if (data.type === 'done') {
+          const s = data.stats || {};
+          statPdfs.textContent = s.pdfs_total ?? statPdfs.textContent;
+          statPages.textContent = (s.total_pages ?? 0).toLocaleString();
+          statChunks.textContent = (s.total_chunks ?? 0).toLocaleString();
+          pageProgress.style.width = '100%';
+          pageCounter.textContent = 'complete';
+          currentFile.innerHTML = `<span style="color:#6ec896;">✓ Ingestion complete</span>`;
+          ingestLogLine(`<span class="ok">─── DONE ───</span>`);
+          ingestLogLine(`<span class="ok">  PDFs: ${s.pdfs_total} (${s.pdfs_ingested} ingested, ${s.pdfs_skipped} skipped)</span>`);
+          ingestLogLine(`<span class="ok">  Pages: ${(s.total_pages||0).toLocaleString()}</span>`);
+          ingestLogLine(`<span class="ok">  Chunks: ${(s.total_chunks||0).toLocaleString()}</span>`);
+          ingestLogLine(`<span class="ok">  Collection size: ${(s.collection_count||0).toLocaleString()} vectors</span>`);
+          stopElapsedTimer();
+          ingestES.close();
+          ingestES = null;
+          ingestBtn.disabled = false;
+          ingestBtn.textContent = 'Start ingestion';
+          // Refresh the header index-status pill — now shows updated counts
+          refreshStatus();
+
+        } else if (data.type === 'error') {
+          ingestLogLine(`<span class="err">ERROR: ${esc(data.error || 'unknown')}</span>`);
+          currentFile.innerHTML = `<span style="color:#d47a7a;">✗ Ingestion failed</span>`;
+          stopElapsedTimer();
+          ingestES.close();
+          ingestES = null;
+          ingestBtn.disabled = false;
+          ingestBtn.textContent = 'Start ingestion';
+        }
+      };
+
+      ingestES.onerror = () => {
+        ingestLogLine(`<span class="err">SSE connection lost.</span>`);
+        currentFile.innerHTML = `<span style="color:#d47a7a;">✗ Connection lost</span>`;
+        stopElapsedTimer();
+        ingestES.close();
+        ingestES = null;
+        ingestBtn.disabled = false;
+        ingestBtn.textContent = 'Start ingestion';
+      };
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Audit view
+    // ──────────────────────────────────────────────────────────────────────
+    const auditVerify = document.getElementById('audit-verify');
+    const auditList = document.getElementById('audit-list');
+    const auditRefreshBtn = document.getElementById('audit-refresh');
+
+    function fmtTime(ts) {
+      const d = new Date(ts * 1000);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function actionClass(action) {
+      if (action.startsWith('USER_'))     return 'input';
+      if (action.startsWith('GUARDRAIL')) return action.includes('block') ? 'gr-blocked' : '';
+      if (action.startsWith('INGEST'))    return 'ingest';
+      return '';
+    }
+
+    function summarizeDetails(action, details) {
+      if (!details) return '';
+      // Try to pull a useful one-liner per action type
+      try {
+        if (action === 'USER_INPUT')       return `"${(details.question || '').slice(0, 100)}"`;
+        if (action === 'GUARDRAIL_CHECK')  return `verdict=${details.verdict}  conf=${(details.confidence??0).toFixed(2)}  · ${details.reason||''}`.slice(0, 200);
+        if (action === 'CHAT_COMPLETE')    return `chunks=${details.n_chunks}  cites=${details.n_citations}  total=${details.timing?.total_ms}ms  in/out=${details.input_tokens}/${details.output_tokens}`;
+        if (action === 'INGEST_START')     return `dir=${details.pdf_dir}  force=${details.force}`;
+        if (action === 'INGEST_COMPLETE')  return `pdfs=${details.pdfs_ingested}/${details.pdfs_total}  pages=${details.total_pages}  chunks=${details.total_chunks}`;
+        if (action === 'INGEST_ERROR')     return details.error || '';
+      } catch {}
+      const s = JSON.stringify(details);
+      return s.length > 200 ? s.slice(0, 200) + '…' : s;
+    }
+
+    async function refreshAudit() {
+      try {
+        const res = await fetch('/audit/log?limit=80');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Verify pill
+        if (data.verify?.valid) {
+          auditVerify.className = 'verify valid';
+          auditVerify.textContent = `Chain valid · ${data.verify.entries} entries`;
+        } else {
+          auditVerify.className = 'verify invalid';
+          auditVerify.textContent = `Chain BROKEN at #${data.verify?.broken_at}`;
+        }
+
+        // List
+        const entries = data.entries || [];
+        if (!entries.length) {
+          auditList.innerHTML = `<span style="color:#4a5468;">No audit entries yet.</span>`;
+          return;
+        }
+        auditList.innerHTML = entries.map(e => `
+          <div class="audit-entry">
+            <div class="top">
+              <span class="action ${actionClass(e.action_type || '')}">${esc(e.action_type || '?')}</span>
+              <span class="ts">${fmtTime(e.timestamp || 0)}</span>
+              <span class="hash" title="${esc(e.hash || '')}">${esc((e.hash || '').slice(0, 12))}…</span>
+            </div>
+            <div class="details">${esc(summarizeDetails(e.action_type, e.details || {}))}</div>
+          </div>
+        `).join('');
+      } catch (e) {
+        auditVerify.className = 'verify invalid';
+        auditVerify.textContent = `Cannot load chain: ${e.message}`;
+        auditList.innerHTML = '';
+      }
+    }
+
+    auditRefreshBtn.addEventListener('click', refreshAudit);
+    // Initial load — refreshed again when user opens the Audit tab
+
+    // ── Submit handler ─────────────────────────────────────────────────────
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const q = questionInput.value.trim();
+      if (!q) return;
+
+      appendUser(q);
+      questionInput.value = '';
+      questionInput.disabled = true;
+      submitBtn.disabled = true;
+      const loading = appendLoading();
+
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: q,
+            k: parseInt(kInput.value) || 8,
+            rerank: rerankToggle.checked,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: res.statusText }));
+          appendError(body.detail || res.statusText, loading);
+        } else {
+          appendBot(await res.json(), loading);
+        }
+      } catch (err) {
+        appendError(err.message, loading);
+      } finally {
+        questionInput.disabled = false;
+        submitBtn.disabled = false;
+        questionInput.focus();
+      }
+    });
+
+    // Focus input on load
+    questionInput.focus();
+  </script>
+</body>
+</html>
